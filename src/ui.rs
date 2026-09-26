@@ -137,7 +137,7 @@ impl ClientWidget{
                     let file_path = path_selected.display().to_string();
 
                     let (tx, rx) = mpsc::channel();
-                    let addr = format!("{}:7878", self.input.value());
+                    let addr = format!("{}:5001", self.input.value());
 
                     if self.input.value().is_empty(){
                         self.logs.push("Please insert ip address server".to_string());
@@ -224,7 +224,7 @@ impl ServerWidget{
             state.select(Some(0));
         }
 
-        let addr = String::from("0.0.0.0:7878");
+        let addr = String::from("0.0.0.0:5001");
         logs.push(format!("Server running at {}", addr));
         let rx = Self::start_server(addr);
 
