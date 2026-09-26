@@ -1,0 +1,101 @@
+name: Release Build
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+env:
+  APP_NAME: "sen"
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-22.04
+            arch: x86_64
+
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-22.04
+            arch: aarch64
+
+          - target: aarch64-linux-android
+            runner: ubuntu-22.04
+            arch: android-aarch64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cargo-ndk (Android)
+        if: matrix.target == 'aarch64-linux-android'
+        run: cargo install cargo-ndk
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+            sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          fi
+
+      - name: Build Release
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: |
+          mkdir -p release
+          FULL_NAME="${{ env.APP_NAME }}-${{ matrix.arch }}"
+
+          if [ "${{ matrix.target }}" = "aarch64-linux-android" ]; then
+            cargo ndk -t arm64-v8a --platform 29 build --release
+            cp target/aarch64-linux-android/release/${{ env.APP_NAME }} release/$FULL_NAME
+          else
+            cargo build --release --target ${{ matrix.target }}
+            cp target/${{ matrix.target }}/release/${{ env.APP_NAME }} release/$FULL_NAME
+          fi
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-${{ matrix.arch }}
+          path: release/${{ env.APP_NAME }}-${{ matrix.arch }}
+          retention-days: 30
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-22.04
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/${{ env.APP_NAME }}-x86_64/${{ env.APP_NAME }}-x86_64
+            artifacts/${{ env.APP_NAME }}-aarch64/${{ env.APP_NAME }}-aarch64
+            artifacts/${{ env.APP_NAME }}-android-aarch64/${{ env.APP_NAME }}-android-aarch64
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

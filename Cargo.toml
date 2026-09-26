@@ -1,0 +1,11 @@
+[package]
+name = "sen"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+crossterm = "0.29.0"
+local-ip-address = "0.6.13"
+ratatui = "0.30.2"
+tui-input = "0.15.5"
+walkdir = "2.5.0"
