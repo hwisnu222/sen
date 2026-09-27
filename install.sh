@@ -24,7 +24,7 @@ else
 fi
 
 if [ "$IS_TERMUX" = true ]; then
-  ASSET_SUFFIX="aarch64-android"
+  ASSET_SUFFIX="android-aarch64"
 else
   ARCH_S=$(uname -m)
   ASSET_SUFFIX="$ARCH_S"
