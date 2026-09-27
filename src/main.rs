@@ -29,7 +29,7 @@ fn main() -> io::Result<()> {
                 ])
                 .split(area);
 
-            let tabs_list = vec!["Client", "Server"];
+            let tabs_list = vec!["Receive", "Send"];
             let tabs = Tabs::new(tabs_list)
                 .block(Block::default().borders(Borders::ALL).title("Mode"))
                 .select(tab_active) 

@@ -2,7 +2,7 @@ use std::{fs::File, io::{self, Read, Write}, net::{TcpListener, TcpStream}, path
 
 use crossterm::event::{Event, KeyCode};
 use local_ip_address::local_ip;
-use ratatui::{Frame, layout::{Constraint, Layout, Rect}, style::{Color, Modifier, Style}, symbols::border, widgets::{Block, Borders, List, ListItem, ListState, Paragraph}};
+use ratatui::{Frame, layout::{Constraint, Layout, Rect}, style::{Color, Modifier, Style}, symbols::border, widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap}};
 use tui_input::{Input, backend::crossterm::EventHandler};
 use walkdir::WalkDir;
 
@@ -11,6 +11,7 @@ pub struct ClientWidget{
     pub logs: Vec<String>,
     pub file_list_state: ListState,
     pub input: Input,
+    pub log_state: ListState
 }
 
 impl ClientWidget{
@@ -34,8 +35,13 @@ impl ClientWidget{
             list_files: files,
             logs: vec![], 
             file_list_state: state,
-            input: Input::default()
+            input: Input::default(),
+            log_state: ListState::default()
         }
+    }
+
+    fn log_update(&mut self){
+        self.log_state.select(Some(self.logs.len() - 1));
     }
 
     fn send_file(server_address: String, file_path: String) -> io::Result<()> {
@@ -72,7 +78,7 @@ impl ClientWidget{
                     Constraint::Length(3),
                     Constraint::Min(0),
                     Constraint::Length(5),
-                    Constraint::Length(3),
+                    Constraint::Length(1),
                 ])
                 .split(layout);
 
@@ -113,7 +119,6 @@ impl ClientWidget{
 
             let logs: Vec<ListItem> = self.logs
                 .iter()
-                .rev()
                 .map(|x|{
                     ListItem::new(x.to_string())
                 }).collect();
@@ -123,9 +128,9 @@ impl ClientWidget{
                 .border_set(border::ROUNDED)
                 .borders(Borders::ALL)
             );
-            f.render_widget(queue_log_widget, l[2] );
-            let footer_widget = Paragraph::new(" [Esc] Exit  |  [c] Client | [s] Sender | [Enter] Send | [Ctrl+Backspace] Backspace")
-                .block(Block::default().borders(Borders::ALL));
+            f.render_stateful_widget(queue_log_widget, l[2], &mut self.log_state);
+            let footer_widget = Paragraph::new(" [Esc] Exit  |  [c] Receive | [s] Send | [Enter] Send file")
+                .wrap(Wrap{ trim: true });
             f.render_widget(footer_widget, l[3]);
     }
 
@@ -159,7 +164,7 @@ impl ClientWidget{
                         }
                     }
 
-
+                    self.log_update();
                 };
 
             }
@@ -205,7 +210,8 @@ pub struct ServerWidget{
     pub list_files: Vec<PathBuf>,
     pub logs: Vec<String>,
     pub file_list_state: ListState,
-    pub server_rx: Receiver<String>
+    pub server_rx: Receiver<String>,
+    pub log_state: ListState
 }
 
 impl ServerWidget{
@@ -225,10 +231,20 @@ impl ServerWidget{
         }
 
         let addr = String::from("0.0.0.0:7878");
-        logs.push(format!("Server running at {}", addr));
+        logs.push("Server running...".to_string());
         let rx = Self::start_server(addr);
 
-        Self { list_files: files, logs, file_list_state: state, server_rx: rx}
+        Self { 
+            list_files: files,
+            logs, 
+            file_list_state: state,
+            server_rx: rx,
+            log_state: ListState::default()
+        }
+    }
+
+    fn log_update(&mut self){
+        self.log_state.select(Some(self.logs.len() - 1));
     }
 
     fn start_server(addr: String) -> Receiver<String>{
@@ -306,7 +322,8 @@ impl ServerWidget{
 
     pub fn render(&mut self, f: &mut Frame, layout: Rect ){
         while let Ok(msg) = self.server_rx.try_recv() {
-            self.logs.push(msg)
+            self.logs.push(msg);
+            self.log_update();
         }
         let l = Layout::default()
             .direction(ratatui::layout::Direction::Vertical)
@@ -314,15 +331,16 @@ impl ServerWidget{
                 Constraint::Length(3),
                 Constraint::Min(0),
                 Constraint::Length(5),
-                Constraint::Length(3),
+                Constraint::Length(1),
             ])
             .split(layout);
         let ip_local = local_ip().unwrap();
-        let header_widget = Paragraph::new(format!("IP: {}", ip_local.to_string()))
-        .block(Block::default()
-            .border_set(border::ROUNDED)
-            .borders(Borders::ALL
-        ));
+        let header_widget = Paragraph::new(ip_local.to_string())
+            .block(Block::default()
+                .title("IP")
+                .border_set(border::ROUNDED)
+                .borders(Borders::ALL
+            ));
         f.render_widget(header_widget, l[0]);
 
         let items: Vec<ListItem> = self.list_files
@@ -341,7 +359,6 @@ impl ServerWidget{
 
         let logs: Vec<ListItem> = self.logs
             .iter()
-            .rev()
             .map(|x|{
                 ListItem::new(x.to_string())
             }).collect();
@@ -351,10 +368,10 @@ impl ServerWidget{
             .border_set(border::ROUNDED)
             .borders(Borders::ALL)
         );
-        f.render_widget(queue_log_widget, l[2] );
+        f.render_stateful_widget(queue_log_widget, l[2], &mut self.log_state);
 
-        let footer_widget = Paragraph::new(" [Esc] Exit  |  [c] Client | [s] Sender")
-            .block(Block::default().borders(Borders::ALL));
+        let footer_widget = Paragraph::new(" [Esc] Exit  |  [c] Receive | [s] Send")
+            .wrap(Wrap{ trim: true });
         f.render_widget(footer_widget, l[3]);
     }
 
