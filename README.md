@@ -17,5 +17,8 @@ sen
 
 ## Screenshots
 
+Send file
 ![send-mode](./assets/send-mode.jpg)
+
+Receive file
 ![receive-mode](./assets/receive-mode.jpg)
