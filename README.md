@@ -1,6 +1,7 @@
-![sen-logo](./assets/sen-logo.svg)
-
-File transfer tool
+<div align="center">
+<img src="./assets/sen-logo.svg" width="400" />
+<p>Sen is a file transfer tool</p>
+</div>
 
 ## Installation
 
@@ -12,8 +13,4 @@ curl -fsSL https://raw.githubusercontent.com/hwisnu222/sen/main/install.sh | sud
 
 ```bash
 sen
-```
-
-```
-
 ```
