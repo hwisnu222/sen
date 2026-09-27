@@ -16,14 +16,7 @@ pub struct ClientWidget{
 
 impl ClientWidget{
     pub fn new() ->Self{
-        let files: Vec<PathBuf> = WalkDir::new(".")
-            .min_depth(1)
-            .max_depth(1)
-            .into_iter()
-            .filter_map(|f| f.ok())
-            .filter(|f| f.file_type().is_file())
-            .map(|f| f.path().to_path_buf())
-            .collect();
+        let files: Vec<PathBuf> = ClientWidget::get_file_list(); 
 
         let mut state = ListState::default();
 
@@ -44,13 +37,32 @@ impl ClientWidget{
         self.log_state.select(Some(self.logs.len() - 1));
     }
 
+    fn get_file_list() -> Vec<PathBuf>{
+       let files: Vec<PathBuf> = WalkDir::new(".")
+            .min_depth(1)
+            .max_depth(1)
+            .into_iter()
+            .filter_map(|f| f.ok())
+            .filter(|f| f.file_type().is_file())
+            .map(|f| f.path().to_path_buf())
+            .collect();
+        files
+    }
+
+    pub fn update_file_list(&mut self){
+        let files =  ClientWidget::get_file_list();
+        self.list_files = files;
+    }
+
     fn send_file(server_address: String, file_path: String) -> io::Result<()> {
         let mut stream = TcpStream::connect(server_address)?;
+
         let file_name = Path::new(&file_path)
             .file_name()
             .and_then(|n| n.to_str())
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Invalid file name"))?;
 
+        // change filename into bytes
         let file_name_bytes = file_name.as_bytes();
         let file_name_len = file_name_bytes.len() as u32;
 
@@ -72,66 +84,67 @@ impl ClientWidget{
     }
 
     pub fn render(&mut self, f: &mut Frame, layout: Rect ){
-            let l = Layout::default()
-                .direction(ratatui::layout::Direction::Vertical)
-                .constraints([
-                    Constraint::Length(3),
-                    Constraint::Min(0),
-                    Constraint::Length(5),
-                    Constraint::Length(1),
-                ])
-                .split(layout);
+        self.update_file_list();
+        let l = Layout::default()
+            .direction(ratatui::layout::Direction::Vertical)
+            .constraints([
+                Constraint::Length(3),
+                Constraint::Min(0),
+                Constraint::Length(5),
+                Constraint::Length(1),
+            ])
+            .split(layout);
 
-            let input_widget = Paragraph::new(self.input.value())
-                .style(Style::default().fg(Color::Yellow))
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(" IP Server ")
-                        .border_set(ratatui::symbols::border::ROUNDED)
-                );
-            f.render_widget(input_widget, l[0]);
-
-            f.set_cursor_position((
-                l[0].x + 1 + self.input.visual_cursor() as u16,
-                l[0].y + 1,
-            ));
-
-            let items: Vec<ListItem> = self.list_files
-                .iter()
-                .map(|f|{
-                    ListItem::new(f.display().to_string())
-                }).collect();
-            let content_widget = List::new(items)
-            .block(Block::default()
-                .title("Files")
-                .border_set(border::ROUNDED)
-                .borders(Borders::ALL)
-            )
-            .highlight_style(
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
+        let input_widget = Paragraph::new(self.input.value())
+            .style(Style::default().fg(Color::Yellow))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" IP Server ")
+                    .border_set(ratatui::symbols::border::ROUNDED)
             );
+        f.render_widget(input_widget, l[0]);
 
-            f.render_stateful_widget(content_widget, l[1], &mut self.file_list_state);
+        f.set_cursor_position((
+            l[0].x + 1 + self.input.visual_cursor() as u16,
+            l[0].y + 1,
+        ));
 
-            let logs: Vec<ListItem> = self.logs
-                .iter()
-                .map(|x|{
-                    ListItem::new(x.to_string())
-                }).collect();
-            let queue_log_widget = List::new(logs)
-            .block(Block::default()
-                .title("Logs")
-                .border_set(border::ROUNDED)
-                .borders(Borders::ALL)
-            );
-            f.render_stateful_widget(queue_log_widget, l[2], &mut self.log_state);
-            let footer_widget = Paragraph::new(" [Esc] Exit  |  [c] Receive | [s] Send | [Enter] Send file")
-                .wrap(Wrap{ trim: true });
-            f.render_widget(footer_widget, l[3]);
+        let items: Vec<ListItem> = self.list_files
+            .iter()
+            .map(|f|{
+                ListItem::new(f.display().to_string())
+            }).collect();
+        let content_widget = List::new(items)
+        .block(Block::default()
+            .title("Files")
+            .border_set(border::ROUNDED)
+            .borders(Borders::ALL)
+        )
+        .highlight_style(
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        );
+
+        f.render_stateful_widget(content_widget, l[1], &mut self.file_list_state);
+
+        let logs: Vec<ListItem> = self.logs
+            .iter()
+            .map(|x|{
+                ListItem::new(x.to_string())
+            }).collect();
+        let queue_log_widget = List::new(logs)
+        .block(Block::default()
+            .title("Logs")
+            .border_set(border::ROUNDED)
+            .borders(Borders::ALL)
+        );
+        f.render_stateful_widget(queue_log_widget, l[2], &mut self.log_state);
+        let footer_widget = Paragraph::new(" [Esc] Exit  |  [s] Send | [r] Receive | [Enter] Send file")
+            .wrap(Wrap{ trim: true });
+        f.render_widget(footer_widget, l[3]);
     }
 
     pub fn handle_event(&mut self, key: KeyCode){
@@ -217,13 +230,7 @@ pub struct ServerWidget{
 impl ServerWidget{
     pub fn new() ->Self{
         let mut logs = vec![];
-        let files: Vec<PathBuf> = WalkDir::new(".")
-            .max_depth(1)
-            .into_iter()
-            .filter_map(|f| f.ok())
-            .map(|f| f.path().to_path_buf())
-            .collect();
-
+        let files: Vec<PathBuf> = ServerWidget::get_file_list();
         let mut state = ListState::default();
 
         if !files.is_empty(){
@@ -241,6 +248,21 @@ impl ServerWidget{
             server_rx: rx,
             log_state: ListState::default()
         }
+    }
+
+    fn get_file_list() -> Vec<PathBuf>{
+        let files: Vec<PathBuf> = WalkDir::new(".")
+            .max_depth(1)
+            .into_iter()
+            .filter_map(|f| f.ok())
+            .map(|f| f.path().to_path_buf())
+            .collect();
+        files
+    }
+
+    pub fn update_file_list(&mut self){
+        let files = ServerWidget::get_file_list();
+        self.list_files = files;
     }
 
     fn log_update(&mut self){
@@ -267,19 +289,21 @@ impl ServerWidget{
                 // listening inbound connection
                 match listener.accept() {
                     Ok((mut stream, _)) => {
+                        // read length filename
                         let mut len_buffer = [0u8; 4];
                         if stream.read_exact(&mut len_buffer).is_err() {
                             let _ = tx_clone.send(String::from("Error: Failed read metadata!"));
                             continue;
                         }
-                        let file_name_len = u32::from_be_bytes(len_buffer) as usize;
 
-                         
+                        // then get filename from length filename
+                        let file_name_len = u32::from_be_bytes(len_buffer) as usize;
                         let mut name_buffer = vec![0u8; file_name_len];
                         if stream.read_exact(&mut name_buffer).is_err() {
                             let _ = tx_clone.send(String::from("Failed read filename!"));
                             continue;
                         }
+                        // convert into utf8
                         let file_name = match String::from_utf8(name_buffer) {
                             Ok(name) => name,
                             Err(_) => {
@@ -324,7 +348,9 @@ impl ServerWidget{
         while let Ok(msg) = self.server_rx.try_recv() {
             self.logs.push(msg);
             self.log_update();
+            self.update_file_list();
         }
+
         let l = Layout::default()
             .direction(ratatui::layout::Direction::Vertical)
             .constraints([
@@ -370,7 +396,7 @@ impl ServerWidget{
         );
         f.render_stateful_widget(queue_log_widget, l[2], &mut self.log_state);
 
-        let footer_widget = Paragraph::new(" [Esc] Exit  |  [c] Receive | [s] Send")
+        let footer_widget = Paragraph::new(" [Esc] Exit  |  [s] Send | [r] Receive")
             .wrap(Wrap{ trim: true });
         f.render_widget(footer_widget, l[3]);
     }

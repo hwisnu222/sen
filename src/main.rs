@@ -29,7 +29,7 @@ fn main() -> io::Result<()> {
                 ])
                 .split(area);
 
-            let tabs_list = vec!["Receive", "Send"];
+            let tabs_list = vec!["Send", "Receive"];
             let tabs = Tabs::new(tabs_list)
                 .block(Block::default().borders(Borders::ALL).title("Mode"))
                 .select(tab_active) 
@@ -55,10 +55,10 @@ fn main() -> io::Result<()> {
             if let Event::Key(key) = event::read()? {
                 match key.code {
                     KeyCode::Esc => {break;}
-                    KeyCode::Char('c') => {
+                    KeyCode::Char('s') => {
                         tab_active = 0;
                     }
-                    KeyCode::Char('s') => {
+                    KeyCode::Char('r') => {
                         tab_active = 1;
                     }
                     _ => {
