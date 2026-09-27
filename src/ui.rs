@@ -68,13 +68,17 @@ impl ClientWidget{
 
         // send length filename (4 bytes, Big Endian)
         stream.write_all(&file_name_len.to_be_bytes())?;
-
         // send string filename
         stream.write_all(file_name_bytes)?;
 
         let mut file = File::open(file_path)?;
-        let mut buffer = [0u8; 65536];
 
+        // send length-content file
+        // to validate file is not corrupt
+        let length_file = file.metadata()?.len();
+        stream.write_all(&length_file.to_be_bytes())?;
+
+        let mut buffer = [0u8; 65536];
         while let Ok(n) = file.read(&mut buffer) {
             if n == 0 { break; }
             stream.write_all(&buffer[..n])?;
@@ -312,6 +316,14 @@ impl ServerWidget{
                             }
                         };
 
+                        let mut size_bytes = [0u8; 8];
+                        if stream.read_exact(&mut size_bytes).is_err(){
+                            let _ = tx_clone.send("Failed read file size".to_string());
+                            continue;
+                        };
+
+                        let file_size = u64::from_be_bytes(size_bytes);
+
                         let _ = tx_clone.send(format!("Transfering: {}", file_name));
 
                         let mut file = match File::create(&file_name) {
@@ -321,15 +333,38 @@ impl ServerWidget{
                                 continue;
                             }
                         };
-                        
+
                         let mut buffer = [0u8; 65536];
-                        while let Ok(n) = stream.read(&mut buffer) {
-                            if n == 0 { break; }
-                            if file.write_all(&buffer[..n]).is_err() {
-                                let _ = tx_clone.send(String::from("Failed create file!"));
-                                break;
-                            }
+                        let mut bytes_remaining = file_size;
+
+                        while bytes_remaining > 0 {
+                            // confirm the buffer length is not over than original file size
+                            let to_read = std::cmp::min(buffer.len() as u64, bytes_remaining) as usize;
+                            
+                            if let Ok(n) = stream.read(&mut buffer[..to_read]){
+                                if n == 0 {
+                                    // if transfer is not finished
+                                    let _ = tx_clone.send(String::from("Disconnected. Can't transfer file!"));
+                                    break;
+                                }
+                                
+                                if file.write_all(&buffer[..n]).is_err(){
+                                    let _ = tx_clone.send(String::from("Failed write file!"));
+                                    break;
+                                };
+                                bytes_remaining -= n as u64;
+                            };
                         }
+
+                        
+                        // let mut buffer = [0u8; 65536];
+                        // while let Ok(n) = stream.read(&mut buffer) {
+                        //     if n == 0 { break; }
+                        //     if file.write_all(&buffer[..n]).is_err() {
+                        //         let _ = tx_clone.send(String::from("Failed write file!"));
+                        //         break;
+                        //     }
+                        // }
 
                         let _ = tx_clone.send(format!("File '{}' received!", file_name));
                     }
