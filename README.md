@@ -14,3 +14,8 @@ curl -fsSL https://raw.githubusercontent.com/hwisnu222/sen/main/install.sh | sud
 ```bash
 sen
 ```
+
+## Screenshots
+
+![send-mode](./assets/send-mode.jpg)
+![receive-mode](./assets/receive-mode.jpg)
