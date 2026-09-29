@@ -12,13 +12,7 @@ if [ -n "${TERMUX_VERSION:-}" ] || [[ "${PREFIX:-}" == *com.termux* ]]; then
   echo "System detected: Termux (aarch64)"
 else
   IS_TERMUX=false
-  INSTALL_DIR="/usr/local/bin"
-
-  # non-Termux
-  if [[ $EUID -ne 0 ]]; then
-    echo "Please run command with sudo"
-    exit 1
-  fi
+  INSTALL_DIR="$HOME/.local/bin"
 
   echo "System detected: Linux ($(uname -m))"
 fi

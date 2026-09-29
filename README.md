@@ -6,7 +6,7 @@
 ## Installation
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hwisnu222/sen/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/hwisnu222/sen/main/install.sh | bash
 ```
 
 ## Usage
