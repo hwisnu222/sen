@@ -1,4 +1,4 @@
-use std::{fs::File, io::{self, Read, Write}, net::{TcpListener, TcpStream}, path::{Path, PathBuf}, sync::mpsc::{self, Receiver}, thread};
+use std::{fs::File, io::{self, Read, Write}, net::{TcpListener, TcpStream}, path::{Path, PathBuf}, sync::{mpsc::{self, Receiver, Sender}}, thread};
 
 use crossterm::event::{Event, KeyCode};
 use local_ip_address::local_ip;
@@ -11,7 +11,9 @@ pub struct ClientWidget{
     pub logs: Vec<String>,
     pub file_list_state: ListState,
     pub input: Input,
-    pub log_state: ListState
+    pub log_state: ListState,
+    pub tx: Sender<String>,
+    pub rx: Receiver<String>
 }
 
 impl ClientWidget{
@@ -24,12 +26,16 @@ impl ClientWidget{
             state.select(Some(0));
         }
 
+        let (tx, rx) = mpsc::channel();
+
         Self { 
             list_files: files,
             logs: vec![], 
             file_list_state: state,
             input: Input::default(),
-            log_state: ListState::default()
+            log_state: ListState::default(),
+            tx,
+            rx
         }
     }
 
@@ -83,12 +89,18 @@ impl ClientWidget{
             if n == 0 { break; }
             stream.write_all(&buffer[..n])?;
         }
+
         stream.flush()?;
         Ok(())
     }
 
     pub fn render(&mut self, f: &mut Frame, layout: Rect ){
         self.update_file_list();
+        if let  Ok(msg) = self.rx.try_recv(){
+            self.logs.push(msg);
+            self.log_update();
+        }
+
         let l = Layout::default()
             .direction(ratatui::layout::Direction::Vertical)
             .constraints([
@@ -158,27 +170,24 @@ impl ClientWidget{
                     let path_selected = &self.list_files[select_file_idx];
                     let file_path = path_selected.display().to_string();
 
-                    let (tx, rx) = mpsc::channel();
                     let addr = format!("{}:7878", self.input.value());
 
                     if self.input.value().is_empty(){
                         self.logs.push("Please insert ip address server".to_string());
                     }else{
                         self.logs.push(format!("Sending file: {}", file_path));
+                        let tx_c = self.tx.clone();
+
                         thread::spawn(move||{
                             match ClientWidget::send_file(addr, file_path){
                                 Ok(_) => {
-                                    let _ = tx.send(String::from("Files is sended"));
+                                    let _ = tx_c.send(String::from("Files is sended!"));
                                 }
                                 Err(_)=>{
-                                    let _ = tx.send(String::from("Failed send files"));
+                                    let _ = tx_c.send(String::from("Failed send files"));
                                 }
                             }
                         });
-
-                        if let  Ok(msg) = rx.try_recv(){
-                            self.logs.push(msg);
-                        }
                     }
 
                     self.log_update();
@@ -291,96 +300,92 @@ impl ServerWidget{
             let _ = tx_clone.send(String::from("Server Active. Waiting client..."));
             loop {
                 // listening inbound connection
-                match listener.accept() {
-                    Ok((mut stream, _)) => {
-                        let tx_per_client = tx_clone.clone();
+                if let Ok((mut stream, _))  = listener.accept(){
+                    let tx_per_client = tx_clone.clone();
 
-                        // handle multi connection, split connection into 
-                        // different thread
-                        thread::spawn(move ||{
-                            // read length filename
-                            let mut len_buffer = [0u8; 4];
-                            if stream.read_exact(&mut len_buffer).is_err() {
-                                let _ = tx_per_client.send(String::from("Error: Failed read metadata!"));
+                    // handle multi connection, split connection into 
+                    // different thread
+                    thread::spawn(move ||{
+                        // read length filename
+                        let mut len_buffer = [0u8; 4];
+                        if stream.read_exact(&mut len_buffer).is_err() {
+                            let _ = tx_per_client.send(String::from("Error: Failed read metadata!"));
+                            return;
+                        }
+
+                        // then get filename from length filename
+                        let file_name_len = u32::from_be_bytes(len_buffer) as usize;
+                        let mut name_buffer = vec![0u8; file_name_len];
+                        if stream.read_exact(&mut name_buffer).is_err() {
+                            let _ = tx_per_client.send(String::from("Failed read filename!"));
+                            return;
+                        }
+                        // convert into utf8
+                        let file_name = match String::from_utf8(name_buffer) {
+                            Ok(name) => name,
+                            Err(_) => {
+                                let _ = tx_per_client.send(String::from("Filename is not valid UTF-8"));
                                 return;
                             }
+                        };
 
-                            // then get filename from length filename
-                            let file_name_len = u32::from_be_bytes(len_buffer) as usize;
-                            let mut name_buffer = vec![0u8; file_name_len];
-                            if stream.read_exact(&mut name_buffer).is_err() {
-                                let _ = tx_per_client.send(String::from("Failed read filename!"));
+                        let mut size_bytes = [0u8; 8];
+                        if stream.read_exact(&mut size_bytes).is_err(){
+                            let _ = tx_per_client.send("Failed read file size".to_string());
+                            return;
+                        };
+
+                        let file_size = u64::from_be_bytes(size_bytes);
+
+                        let _ = tx_per_client.send(format!("Transfering: {}", file_name));
+
+                        let mut file = match File::create(&file_name) {
+                            Ok(f) => f,
+                            Err(_) => {
+                                let _ = tx_per_client.send(format!("Failed create {} file", file_name));
                                 return;
                             }
-                            // convert into utf8
-                            let file_name = match String::from_utf8(name_buffer) {
-                                Ok(name) => name,
-                                Err(_) => {
-                                    let _ = tx_per_client.send(String::from("Filename is not valid UTF-8"));
-                                    return;
-                                }
-                            };
+                        };
 
-                            let mut size_bytes = [0u8; 8];
-                            if stream.read_exact(&mut size_bytes).is_err(){
-                                let _ = tx_per_client.send("Failed read file size".to_string());
-                                return;
-                            };
+                        let mut buffer = [0u8; 65536];
+                        let mut bytes_remaining = file_size;
 
-                            let file_size = u64::from_be_bytes(size_bytes);
-
-                            let _ = tx_per_client.send(format!("Transfering: {}", file_name));
-
-                            let mut file = match File::create(&file_name) {
-                                Ok(f) => f,
-                                Err(_) => {
-                                    let _ = tx_per_client.send(format!("Failed create {} file", file_name));
-                                    return;
-                                }
-                            };
-
-                            let mut buffer = [0u8; 65536];
-                            let mut bytes_remaining = file_size;
-
-                            while bytes_remaining > 0 {
-                                // confirm the buffer length is not over than original file size
-                                let to_read = std::cmp::min(buffer.len() as u64, bytes_remaining) as usize;
-                                
-                                if let Ok(n) = stream.read(&mut buffer[..to_read]){
-                                    if n == 0 {
-                                        // if transfer is not finished
-                                        let _ = tx_per_client.send(String::from("Disconnected. Can't transfer file!"));
-                                        break;
-                                    }
-                                    
-                                    if file.write_all(&buffer[..n]).is_err(){
-                                        let _ = tx_per_client.send(String::from("Failed write file!"));
-                                        break;
-                                    };
-                                    bytes_remaining -= n as u64;
-                                };
-                            }
-
+                        while bytes_remaining > 0 {
+                            // confirm the buffer length is not over than original file size
+                            let to_read = std::cmp::min(buffer.len() as u64, bytes_remaining) as usize;
                             
-                            // let mut buffer = [0u8; 65536];
-                            // while let Ok(n) = stream.read(&mut buffer) {
-                            //     if n == 0 { break; }
-                            //     if file.write_all(&buffer[..n]).is_err() {
-                            //         let _ = tx_clone.send(String::from("Failed write file!"));
-                            //         break;
-                            //     }
-                            // }
+                            if let Ok(n) = stream.read(&mut buffer[..to_read]){
+                                if n == 0 {
+                                    // if transfer is not finished
+                                    let _ = tx_per_client.send(String::from("Disconnected. Can't transfer file!"));
+                                    break;
+                                }
+                                
+                                if file.write_all(&buffer[..n]).is_err(){
+                                    let _ = tx_per_client.send(String::from("Failed write file!"));
+                                    break;
+                                };
+                                bytes_remaining -= n as u64;
+                            };
+                        }
 
-                            let _ = tx_per_client.send(format!("File '{}' received!", file_name));
-                        });
-                    }
-                    Err(_) => {
-                        let _ = tx_clone.send(String::from("Failed receive connection!"));
-                    }
-                }   
+                        
+                        // let mut buffer = [0u8; 65536];
+                        // while let Ok(n) = stream.read(&mut buffer) {
+                        //     if n == 0 { break; }
+                        //     if file.write_all(&buffer[..n]).is_err() {
+                        //         let _ = tx_clone.send(String::from("Failed write file!"));
+                        //         break;
+                        //     }
+                        // }
+                        let _ = tx_per_client.send(format!("File '{}' received!", file_name));
+                    });
+
+                }else {
+                    let _ = tx_clone.send(String::from("Failed receive connection!"));
+                }
             }
         });
-
 
         rx
     }
